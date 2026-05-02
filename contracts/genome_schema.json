@@ -1,0 +1,39 @@
+{
+  "_comment": "Signal Genome v1.0 — DO NOT change without all 3 engineers agreeing",
+  "genome_id":      "string (uuid)",
+  "post_id":        "string (uuid)",
+  "created_at":     "ISO8601 string",
+  "source":         "string — eg: reddit/r/diabetes",
+  "source_type":    "string — reddit | twitter | forum | rss",
+  "source_url":     "string",
+  "raw_text":       "string",
+  "signal_type":    "string — adverse_drug_reaction | distress | misinformation | treatment_dissatisfaction | general",
+  "sentiment_score":"float -1.0 to 1.0",
+  "distress_level": "float 0.0 to 1.0",
+  "confidence_score":"float 0.0 to 1.0",
+  "entities": {
+    "drugs":        "string[]",
+    "symptoms":     "string[]",
+    "conditions":   "string[]",
+    "locations":    "string[]",
+    "institutions": "string[]"
+  },
+  "geo": {
+    "extracted_locations":  "string[]",
+    "subreddit_geo_proxy":  "string — ISO country/region code",
+    "google_trends_region": "string",
+    "confidence":           "float"
+  },
+  "novelty": {
+    "in_fda_label":     "boolean",
+    "faers_count":      "integer",
+    "internal_7d_count":"integer",
+    "score":            "float 0.0 to 1.0"
+  },
+  "pii_detected":    "boolean",
+  "phi_detected":    "boolean",
+  "pii_redacted_text":"string | null",
+  "explanation":     "string — human readable XAI explanation",
+  "cluster_id":      "string (uuid) | null",
+  "related_genome_ids":"string[]"
+}

@@ -1,0 +1,19 @@
+{
+  "_comment": "RawPost v1.0 — output of all crawlers, input to pipeline. DO NOT change.",
+  "post_id":     "string (uuid)",
+  "source":      "string — eg: reddit/r/diabetes",
+  "source_type": "string — reddit | twitter | forum | rss",
+  "text":        "string — full post text",
+  "url":         "string",
+  "author":      "string | null",
+  "timestamp":   "ISO8601 string",
+  "metadata":    {
+    "subreddit":    "string (reddit only)",
+    "score":        "integer (reddit only)",
+    "geo_proxy":    "string (reddit only)",
+    "likes":        "integer (twitter only)",
+    "retweets":     "integer (twitter only)",
+    "forum_url":    "string (forum only)",
+    "is_fda":       "boolean (rss only)"
+  }
+}
