@@ -4,17 +4,36 @@ Uses BioBERT for biomedical NER + spaCy for location/org extraction.
 RxNorm normalizes drug names to canonical form.
 """
 import requests
-from transformers import pipeline as hf_pipeline
 import spacy
+from transformers import pipeline as hf_pipeline
 from models.genome import Entities, GeoSignal
 
-# Load models once at module level (expensive - do NOT reload per request)
-bio_ner = hf_pipeline(
-    "ner",
-    model="allenai/scibert_scivocab_uncased",
-    aggregation_strategy="simple"
-)
-nlp_spacy = spacy.load("en_core_web_sm")
+# Lazy references — nothing loads at import time
+_bio_ner   = None
+_nlp_spacy = None
+
+def get_bio_ner():
+    global _bio_ner
+    if _bio_ner is None:
+        print("Loading biomedical NER model...")
+        _bio_ner = hf_pipeline(
+            "token-classification",
+            model="d4data/biomedical-ner-all",
+            aggregation_strategy="simple"
+        )
+        print("NER model ready.")
+    return _bio_ner
+
+def get_spacy():
+    global _nlp_spacy
+    if _nlp_spacy is None:
+        try:
+            _nlp_spacy = spacy.load("en_core_web_sm")
+            print("spaCy model ready.")
+        except OSError:
+            print("WARNING: spaCy model not found — skipping location extraction.")
+            _nlp_spacy = False   # False means tried and failed, don't retry
+    return _nlp_spacy if _nlp_spacy else None
 
 RXNORM_URL = "https://rxnav.nlm.nih.gov/REST/rxcui.json"
 
@@ -43,31 +62,39 @@ class NERExtractor:
         geo      = GeoSignal()
 
         # BioBERT biomedical NER
+        # Bio NER
         try:
-            bio_results = bio_ner(text[:512])
+            bio_results = get_bio_ner()(text[:512])
             for ent in bio_results:
                 label = ent.get("entity_group", "").upper()
                 word  = ent.get("word", "").strip()
                 if not word:
                     continue
+
                 if "CHEM" in label or "DRUG" in label:
                     normalized = normalize_drug_name(word)
                     if normalized not in entities.drugs:
                         entities.drugs.append(normalized)
+
                 elif "DISEASE" in label or "SYMPTOM" in label:
                     if word not in entities.symptoms:
                         entities.symptoms.append(word)
+
         except Exception as e:
             print(f"BioBERT NER error: {e}")
 
-        # spaCy for locations and organizations
+
+        # spaCy NER
         try:
-            doc = nlp_spacy(text[:512])
-            for ent in doc.ents:
-                if ent.label_ in ("GPE", "LOC") and ent.text not in entities.locations:
-                    entities.locations.append(ent.text)
-                if ent.label_ == "ORG" and ent.text not in entities.institutions:
-                    entities.institutions.append(ent.text)
+            nlp = get_spacy()
+            if nlp:
+                doc = nlp(text[:512])
+                for ent in doc.ents:
+                    if ent.label_ in ("GPE", "LOC") and ent.text not in entities.locations:
+                        entities.locations.append(ent.text)
+                    if ent.label_ == "ORG" and ent.text not in entities.institutions:
+                        entities.institutions.append(ent.text)
+
         except Exception as e:
             print(f"spaCy NER error: {e}")
 
