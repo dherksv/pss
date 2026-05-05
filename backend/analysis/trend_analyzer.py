@@ -1,61 +1,244 @@
 """
-analysis/trend_analyzer.py - Trend Analysis Engine | OWNER: Engineer B
-Computes signal volume over time, integrates Google Trends correlation.
-"""
-from datetime import datetime, timedelta
-from pytrends.request import TrendReq
-from storage.sqlite_store import get_genomes_by_period
+trend_analyzer.py — Google Trends + internal signal trend analysis
 
+Two jobs:
+  1. External trends  — pytrends Google Trends API for a drug/symptom pair
+                        Enriches genome.geo.google_trends_region
+  2. Internal trends  — queries ChromaDB to see if a signal is growing
+                        over time (used by Engineer C's dashboard endpoint)
+
+pytrends is rate-limited. We cache results for 1 hour per query.
+All network calls have timeouts and fail gracefully.
+"""
+
+import logging
+import time
+from datetime import datetime, timezone, timedelta
+from typing import Optional
+
+logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Lazy pytrends loader
+# ---------------------------------------------------------------------------
+
+_pytrends = None
+
+
+def _get_pytrends():
+    global _pytrends
+    if _pytrends is None:
+        try:
+            from pytrends.request import TrendReq
+            _pytrends = TrendReq(
+                hl="en-US",
+                tz=0,           # UTC
+                timeout=(5, 15),  # (connect, read)
+                retries=1,
+                backoff_factor=0.5,
+            )
+            logger.info("pytrends client initialised.")
+        except ImportError:
+            logger.warning("pytrends not installed — Google Trends disabled.")
+            _pytrends = None
+    return _pytrends
+
+
+# ---------------------------------------------------------------------------
+# In-process cache (TTL = 1 hour — pytrends rate limits aggressively)
+# ---------------------------------------------------------------------------
+
+_trends_cache: dict[str, tuple[dict, float]] = {}   # key → (result, timestamp)
+CACHE_TTL_SECONDS = 3600
+
+
+def _cache_get(key: str) -> Optional[dict]:
+    if key in _trends_cache:
+        result, ts = _trends_cache[key]
+        if time.time() - ts < CACHE_TTL_SECONDS:
+            return result
+        del _trends_cache[key]
+    return None
+
+
+def _cache_set(key: str, value: dict):
+    _trends_cache[key] = (value, time.time())
+
+
+# ---------------------------------------------------------------------------
+# TrendAnalyzer
+# ---------------------------------------------------------------------------
 
 class TrendAnalyzer:
-    def __init__(self):
-        self.pytrends = TrendReq(hl="en-US", tz=360)
+    """
+    Call .get_trends(drug, symptom) → TrendResult dict
+    Call .get_internal_trend(drug, symptom) → list of counts by hour
+    """
 
-    def signal_trend(self, drug: str, days: int = 30) -> dict:
-        """Returns daily signal counts for a drug over N days."""
-        since  = datetime.utcnow() - timedelta(days=days)
-        genomes = get_genomes_by_period(drug=drug, since=since)
-
-        # Group by date
-        by_date = {}
-        for g in genomes:
-            date = g["created_at"][:10]
-            by_date[date] = by_date.get(date, 0) + 1
-
-        return {"drug": drug, "days": days, "timeline": by_date}
-
-    def google_trends_correlation(self, keywords: list, timeframe: str = "today 30-d") -> dict:
+    def get_trends(self, drug: str, symptom: str) -> dict:
         """
-        Fetch Google Trends data for keywords.
-        Returns interest_over_time and interest_by_region dicts.
+        Fetch Google Trends interest for drug+symptom.
+        Returns a dict suitable for enriching genome.geo fields.
+
+        Returns:
+            {
+                "google_trends_region": str,   # top region/country
+                "trend_score": float,           # 0-100 normalised
+                "rising": bool,                 # is it trending up?
+                "related_queries": list[str],
+                "source": "google_trends" | "unavailable"
+            }
+        """
+        cache_key = f"trends:{drug.lower()}:{symptom.lower()}"
+        cached = _cache_get(cache_key)
+        if cached:
+            return cached
+
+        pt = _get_pytrends()
+        if pt is None:
+            return self._unavailable_result()
+
+        try:
+            keywords = [f"{drug} {symptom}"][:5]  # pytrends max 5 kw
+
+            pt.build_payload(
+                kw_list=keywords,
+                cat=0,          # all categories
+                timeframe="now 7-d",
+                geo="",         # worldwide
+            )
+
+            # Interest by region
+            by_region = pt.interest_by_region(resolution="COUNTRY", inc_low_vol=False)
+
+            top_region = ""
+            trend_score = 0.0
+
+            if not by_region.empty:
+                # Top country by interest
+                col = keywords[0]
+                if col in by_region.columns:
+                    top_row    = by_region[col].idxmax()
+                    trend_score = float(by_region[col].max())
+                    top_region  = str(top_row)
+
+            # Related rising queries
+            related = pt.related_queries()
+            rising_queries = []
+            for kw, data in related.items():
+                if data and data.get("rising") is not None:
+                    rq = data["rising"]
+                    if rq is not None and not rq.empty:
+                        rising_queries = rq["query"].tolist()[:5]
+                        break
+
+            # Is it trending up? Check over time
+            over_time = pt.interest_over_time()
+            is_rising = False
+            if not over_time.empty and keywords[0] in over_time.columns:
+                series   = over_time[keywords[0]].tolist()
+                if len(series) >= 4:
+                    # Rising if last quarter is higher than first quarter
+                    mid      = len(series) // 2
+                    is_rising = (sum(series[mid:]) / len(series[mid:])
+                                 > sum(series[:mid]) / len(series[:mid]))
+
+            result = {
+                "google_trends_region": top_region,
+                "trend_score":          round(trend_score, 2),
+                "rising":               is_rising,
+                "related_queries":      rising_queries,
+                "source":               "google_trends",
+            }
+
+            _cache_set(cache_key, result)
+            logger.info(
+                f"Google Trends: {drug}+{symptom} → region={top_region}, "
+                f"score={trend_score:.1f}, rising={is_rising}"
+            )
+            return result
+
+        except Exception as e:
+            logger.warning(f"pytrends failed for {drug}/{symptom}: {e}")
+            return self._unavailable_result()
+
+    def get_internal_trend(
+        self,
+        drug:    str,
+        symptom: str,
+        hours:   int = 24,
+    ) -> list[dict]:
+        """
+        Query ChromaDB for hourly signal counts over the last N hours.
+        Returns list of {"hour": ISO string, "count": int} dicts.
+        Used by Engineer C's /trends endpoint for the dashboard chart.
+        """
+        from storage.chroma_store import get_chroma_store
+        store = get_chroma_store()
+
+        now     = datetime.now(timezone.utc)
+        buckets = []
+
+        for h in range(hours, 0, -1):
+            window_end   = now - timedelta(hours=h - 1)
+            window_start = now - timedelta(hours=h)
+
+            # query_by_drug_symptom uses a single window — approximate with
+            # counting and differencing
+            recent = store.query_by_drug_symptom(drug, symptom, hours=h)
+
+            # Count only those in this specific 1-hour bucket
+            bucket_count = sum(
+                1 for g in recent
+                if window_start.isoformat() <= g.get("created_at", "") < window_end.isoformat()
+            )
+
+            buckets.append({
+                "hour":  window_start.isoformat(),
+                "count": bucket_count,
+            })
+
+        return buckets
+
+    def enrich_genome_geo(self, genome: dict, drug: str, symptom: str) -> dict:
+        """
+        Convenience method called by PipelineProcessor (optional enrichment).
+        Updates genome.geo.google_trends_region in place.
+        Non-blocking: failures silently leave field empty.
         """
         try:
-            self.pytrends.build_payload(keywords[:5], timeframe=timeframe)
-            return {
-                "interest_over_time": self.pytrends.interest_over_time().to_dict(),
-                "interest_by_region": self.pytrends.interest_by_region(
-                    resolution="COUNTRY").to_dict(),
-                "related_queries":    self.pytrends.related_queries(),
-            }
+            trends = self.get_trends(drug, symptom)
+            genome["geo"]["google_trends_region"] = trends.get("google_trends_region", "")
+            genome["geo"]["confidence"] = min(
+                1.0,
+                genome["geo"].get("confidence", 0.5)
+                + (0.2 if trends["source"] == "google_trends" else 0.0)
+            )
         except Exception as e:
-            return {"error": str(e)}
+            logger.debug(f"Trend geo enrichment failed (non-fatal): {e}")
+        return genome
 
-    def top_entities(self, project_id: str, days: int = 7) -> dict:
-        """Returns top drugs, symptoms, signal types for a project."""
-        since   = datetime.utcnow() - timedelta(days=days)
-        genomes = get_genomes_by_period(project_id=project_id, since=since)
-
-        drugs, symptoms, types = {}, {}, {}
-        for g in genomes:
-            for d in g.get("drugs", []):
-                drugs[d] = drugs.get(d, 0) + 1
-            for s in g.get("symptoms", []):
-                symptoms[s] = symptoms.get(s, 0) + 1
-            t = g.get("signal_type", "general")
-            types[t] = types.get(t, 0) + 1
-
+    @staticmethod
+    def _unavailable_result() -> dict:
         return {
-            "top_drugs":    sorted(drugs.items(),    key=lambda x: -x[1])[:10],
-            "top_symptoms": sorted(symptoms.items(), key=lambda x: -x[1])[:10],
-            "signal_types": types,
+            "google_trends_region": "",
+            "trend_score":          0.0,
+            "rising":               False,
+            "related_queries":      [],
+            "source":               "unavailable",
         }
+
+
+# ---------------------------------------------------------------------------
+# Module singleton
+# ---------------------------------------------------------------------------
+
+_analyzer_instance: Optional[TrendAnalyzer] = None
+
+
+def get_trend_analyzer() -> TrendAnalyzer:
+    global _analyzer_instance
+    if _analyzer_instance is None:
+        _analyzer_instance = TrendAnalyzer()
+    return _analyzer_instance

@@ -1,6 +1,8 @@
 """
 pipeline/scorer.py - Scoring engine | OWNER: Engineer B
 """
+
+import logging
 import requests
 from models.genome import SignalGenome, NoveltyScore
 

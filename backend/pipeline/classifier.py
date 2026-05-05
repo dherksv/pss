@@ -13,10 +13,14 @@ MISINFORMATION_SIGNALS = [
     "they don't want you to know",
 ]
 
-DISSATISFACTION_SIGNALS = [
-    "worst doctor", "terrible hospital", "no one listened",
-    "misdiagnosed", "wrong medication", "refused to treat",
-    "ignored my symptoms", "didn't help at all",
+# Severity boosters — increase ADR confidence
+_SEVERITY_BOOSTERS = [
+    re.compile(p, re.IGNORECASE) for p in [
+        r"\b(?:hospitalized?|emergency|ER|ICU|ambulance)\b",
+        r"\b(?:severe|serious|life[\s-]threatening|critical)\b",
+        r"\b(?:stopped?\s+breathing|cardiac|stroke|seizure)\b",
+        r"\b(?:death|died|fatal|fatality|passed\s+away)\b",
+    ]
 ]
 
 ADR_SIGNALS = [
