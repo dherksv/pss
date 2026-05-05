@@ -17,36 +17,108 @@ All models are lazy-loaded. See CRITICAL note in pii_scanner.py.
 import re
 import logging
 import requests
-import spacy
-from transformers import pipeline as hf_pipeline
-from models.genome import Entities, GeoSignal
+from typing import Optional
+from dataclasses import dataclass, field
 
-# Lazy references — nothing loads at import time
-_bio_ner   = None
-_nlp_spacy = None
+logger = logging.getLogger(__name__)
 
-def get_bio_ner():
+# ---------------------------------------------------------------------------
+# Lazy model loader — SciBERT NER
+# ---------------------------------------------------------------------------
+
+_bio_ner = None
+
+
+def _get_bio_ner():
     global _bio_ner
     if _bio_ner is None:
-        print("Loading biomedical NER model...")
-        _bio_ner = hf_pipeline(
-            "token-classification",
-            model="d4data/biomedical-ner-all",
-            aggregation_strategy="simple"
+        from transformers import pipeline
+        logger.info("Loading SciBERT NER model (first call)...")
+        _bio_ner = pipeline(
+            "ner",
+            model="allenai/scibert_scivocab_uncased",
+            aggregation_strategy="simple",
+            # Uses TRANSFORMERS_CACHE env var automatically
         )
-        print("NER model ready.")
+        logger.info("SciBERT NER loaded.")
     return _bio_ner
 
-def get_spacy():
-    global _nlp_spacy
-    if _nlp_spacy is None:
-        try:
-            _nlp_spacy = spacy.load("en_core_web_sm")
-            print("spaCy model ready.")
-        except OSError:
-            print("WARNING: spaCy model not found — skipping location extraction.")
-            _nlp_spacy = False   # False means tried and failed, don't retry
-    return _nlp_spacy if _nlp_spacy else None
+
+# Lazy spaCy (shared with pii_scanner but we keep independent singleton
+# so each module is self-contained)
+_nlp = None
+
+
+def _get_nlp():
+    global _nlp
+    if _nlp is None:
+        import spacy
+        _nlp = spacy.load("en_core_web_sm")
+    return _nlp
+
+
+# ---------------------------------------------------------------------------
+# Domain keyword lists — fast pre/post filter
+# ---------------------------------------------------------------------------
+
+# Known drug brand names — supplement SciBERT when it misses trade names
+DRUG_KEYWORDS = {
+    "ozempic", "wegovy", "mounjaro", "trulicity", "victoza", "rybelsus",
+    "metformin", "insulin", "humira", "keytruda", "dupixent", "xarelto",
+    "eliquis", "lipitor", "atorvastatin", "lisinopril", "amlodipine",
+    "semaglutide", "tirzepatide", "liraglutide", "dulaglutide",
+    "cough syrup", "doc-1 max", "doc1max", "promethazine", "codeine",
+    "ibuprofen", "acetaminophen", "paracetamol", "aspirin", "prednisone",
+    "amoxicillin", "azithromycin", "doxycycline",
+}
+
+# Symptom / adverse effect keywords
+SYMPTOM_KEYWORDS = {
+    "hair loss", "alopecia", "nausea", "vomiting", "diarrhea", "diarrhoea",
+    "fatigue", "headache", "dizziness", "rash", "itching", "pruritus",
+    "chest pain", "palpitations", "shortness of breath", "dyspnea",
+    "abdominal pain", "stomach pain", "cramps", "bloating", "constipation",
+    "insomnia", "anxiety", "depression", "suicidal", "weight loss",
+    "weight gain", "swelling", "edema", "numbness", "tingling",
+    "vision changes", "blurred vision", "liver damage", "jaundice",
+    "kidney failure", "renal failure", "respiratory failure",
+    "anaphylaxis", "allergic reaction", "seizure", "stroke", "heart attack",
+    "pancreatitis", "thyroid", "cancer", "tumor",
+}
+
+# Medical conditions
+CONDITION_KEYWORDS = {
+    "diabetes", "type 2 diabetes", "type 1 diabetes", "obesity",
+    "hypertension", "high blood pressure", "hyperlipidemia", "cholesterol",
+    "asthma", "copd", "heart disease", "atrial fibrillation",
+    "depression", "anxiety", "bipolar", "schizophrenia",
+    "arthritis", "rheumatoid", "lupus", "multiple sclerosis",
+    "parkinson", "alzheimer", "dementia", "epilepsy",
+    "hypothyroidism", "hyperthyroidism", "thyroiditis",
+    "crohn", "ulcerative colitis", "ibd", "celiac",
+    "psoriasis", "eczema", "dermatitis",
+}
+
+
+# ---------------------------------------------------------------------------
+# Result dataclass
+# ---------------------------------------------------------------------------
+
+@dataclass
+class NERResult:
+    drugs:          list[str] = field(default_factory=list)
+    symptoms:       list[str] = field(default_factory=list)
+    conditions:     list[str] = field(default_factory=list)
+    locations:      list[str] = field(default_factory=list)
+    institutions:   list[str] = field(default_factory=list)
+    rxnorm_map:     dict[str, str] = field(default_factory=dict)  # brand → generic
+
+
+# ---------------------------------------------------------------------------
+# RxNorm normalization
+# ---------------------------------------------------------------------------
+
+_rxnorm_cache: dict[str, Optional[str]] = {}   # simple in-process cache
 
 RXNORM_URL = "https://rxnav.nlm.nih.gov/REST/rxcui.json"
 
@@ -139,11 +211,32 @@ class NERExtractor:
     # Internal helpers
     # ------------------------------------------------------------------
 
-        # BioBERT biomedical NER
-        # Bio NER
+    def _keyword_match(self, text_lower: str, result: NERResult):
+        """Scan for known keywords (multi-word phrases first, then single)."""
+        # Sort by length desc so "hair loss" matches before "hair"
+        for phrase in sorted(DRUG_KEYWORDS, key=len, reverse=True):
+            if phrase in text_lower:
+                result.drugs.append(phrase)
+                # Remove matched region to avoid double-counting
+                text_lower = text_lower.replace(phrase, " ", 1)
+
+        for phrase in sorted(SYMPTOM_KEYWORDS, key=len, reverse=True):
+            if phrase in text_lower:
+                result.symptoms.append(phrase)
+                text_lower = text_lower.replace(phrase, " ", 1)
+
+        for phrase in sorted(CONDITION_KEYWORDS, key=len, reverse=True):
+            if phrase in text_lower:
+                result.conditions.append(phrase)
+                text_lower = text_lower.replace(phrase, " ", 1)
+
+    def _scibert_extract(self, text: str, result: NERResult):
+        """Run SciBERT NER and map entity types to our schema."""
         try:
-            bio_results = get_bio_ner()(text[:512])
-            for ent in bio_results:
+            ner = _get_bio_ner()
+            entities = ner(text[:512])  # SciBERT max token length guard
+
+            for ent in entities:
                 label = ent.get("entity_group", "").upper()
                 word  = ent.get("word", "").strip()
                 score = ent.get("score", 0.0)
@@ -151,30 +244,36 @@ class NERExtractor:
                 if score < 0.6 or len(word) < 2:
                     continue
 
-                if "CHEM" in label or "DRUG" in label:
-                    normalized = normalize_drug_name(word)
-                    if normalized not in entities.drugs:
-                        entities.drugs.append(normalized)
-
-                elif "DISEASE" in label or "SYMPTOM" in label:
-                    if word not in entities.symptoms:
-                        entities.symptoms.append(word)
+                # SciBERT uses generic labels — map to our schema heuristically
+                if label in ("DRUG", "CHEMICAL", "MEDICATION"):
+                    result.drugs.append(word)
+                elif label in ("DISEASE", "SYMPTOM", "SIGN_SYMPTOM", "ADR"):
+                    result.symptoms.append(word)
+                elif label in ("CONDITION", "DISORDER"):
+                    result.conditions.append(word)
+                else:
+                    # Unknown label — apply heuristic: short all-caps = drug abbrev
+                    if word.isupper() and 3 <= len(word) <= 8:
+                        result.drugs.append(word)
 
         except Exception as e:
             logger.warning(f"SciBERT NER failed (non-fatal): {e}")
 
-
-        # spaCy NER
+    def _spacy_extract(self, text: str, result: NERResult):
+        """Use spaCy to catch locations and institutions."""
         try:
-            nlp = get_spacy()
-            if nlp:
-                doc = nlp(text[:512])
-                for ent in doc.ents:
-                    if ent.label_ in ("GPE", "LOC") and ent.text not in entities.locations:
-                        entities.locations.append(ent.text)
-                    if ent.label_ == "ORG" and ent.text not in entities.institutions:
-                        entities.institutions.append(ent.text)
+            nlp = _get_nlp()
+            doc = nlp(text[:1000])  # spaCy limit guard
 
+            for ent in doc.ents:
+                if ent.label_ in ("GPE", "LOC", "FAC"):
+                    result.locations.append(ent.text)
+                elif ent.label_ == "ORG":
+                    # Filter: likely medical institution
+                    if any(kw in ent.text.lower() for kw in
+                           ("hospital", "clinic", "pharma", "health",
+                            "medical", "fda", "cdc", "who", "lab")):
+                        result.institutions.append(ent.text)
         except Exception as e:
             logger.warning(f"spaCy extraction failed (non-fatal): {e}")
 
