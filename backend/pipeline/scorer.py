@@ -1,21 +1,29 @@
 """
 pipeline/scorer.py - Scoring engine | OWNER: Engineer B
-Computes sentiment, distress, confidence, and novelty scores.
-Novelty score cross-references FDA APIs (free, no key needed).
 """
 import requests
-from transformers import pipeline as hf_pipeline
 from models.genome import SignalGenome, NoveltyScore
 
-sentiment_model = hf_pipeline(
-    "sentiment-analysis",
-    model="cardiffnlp/twitter-roberta-base-sentiment-latest"
-)
+# Lazy reference
+_sentiment_model = None
 
-FDA_LABEL_URL  = "https://api.fda.gov/drug/label.json"
-FDA_FAERS_URL  = "https://api.fda.gov/drug/event.json"
+FDA_LABEL_URL = "https://api.fda.gov/drug/label.json"
+FDA_FAERS_URL = "https://api.fda.gov/drug/event.json"
 
 LABEL_MAP = {"positive": 1.0, "neutral": 0.0, "negative": -1.0}
+
+
+def get_sentiment_model():
+    global _sentiment_model
+    if _sentiment_model is None:
+        from transformers import pipeline as hf_pipeline
+        print("Loading sentiment model...")
+        _sentiment_model = hf_pipeline(
+            "sentiment-analysis",
+            model="cardiffnlp/twitter-roberta-base-sentiment-latest"
+        )
+        print("Sentiment model ready.")
+    return _sentiment_model
 
 
 class SignalScorer:
@@ -26,12 +34,13 @@ class SignalScorer:
 
     def _sentiment(self, genome: SignalGenome, text: str) -> SignalGenome:
         try:
-            result = sentiment_model(text[:512])[0]
+            result = get_sentiment_model()(text[:512])[0]
             label  = result["label"].lower()
             score  = result["score"]
             genome.sentiment_score  = LABEL_MAP.get(label, 0.0) * score
             genome.confidence_score = score
-        except Exception:
+        except Exception as e:
+            print(f"Sentiment error: {e}")
             genome.sentiment_score  = 0.0
             genome.confidence_score = 0.0
         return genome
