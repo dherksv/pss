@@ -1,39 +1,66 @@
 """
-routes/signals.py - Signal genome API | OWNER: Engineer C
-Read genomes, filter by project/drug/type/date.
+routes/signals.py | OWNER: Engineer C
 """
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Query, HTTPException
 from storage.sqlite_store import get_conn
 import json
 
 router = APIRouter()
 
 
-@router.get("/")
-def list_signals(
-    project_id: str = Query(None),
-    signal_type: str = Query(None),
-    drug: str = Query(None),
-    limit: int = Query(50, le=200),
-    offset: int = Query(0),
-):
-    query  = "SELECT * FROM genomes WHERE 1=1"
-    params = []
+def _parse(row: dict) -> dict:
+    for field in ["drugs", "symptoms", "locations"]:
+        if isinstance(row.get(field), str):
+            try: row[field] = json.loads(row[field])
+            except: row[field] = []
+    return row
+
+
+@router.get("/stats")
+def signal_stats(project_id: str = Query(None)):
+    """Aggregate counts by signal_type — used by dashboard metric cards."""
+    query  = "SELECT signal_type, COUNT(*) as count FROM genomes WHERE 1=1"
+    params: list = []
     if project_id:
         query += " AND project_id=?"; params.append(project_id)
-    if signal_type:
-        query += " AND signal_type=?"; params.append(signal_type)
-    if drug:
-        query += " AND drugs LIKE ?"; params.append(f"%{drug}%")
+    query += " GROUP BY signal_type"
+    with get_conn() as conn:
+        rows = conn.execute(query, params).fetchall()
+        return {r["signal_type"]: r["count"] for r in rows}
+
+
+@router.get("/")
+def list_signals(
+    project_id:  str = Query(None),
+    signal_type: str = Query(None),
+    drug:        str = Query(None),
+    symptom:     str = Query(None),
+    source_type: str = Query(None),
+    limit:       int = Query(50, le=200),
+    offset:      int = Query(0),
+):
+    """List genomes with optional filters — used by Live Feed panel."""
+    query  = "SELECT * FROM genomes WHERE 1=1"
+    params: list = []
+    if project_id:  query += " AND project_id=?";    params.append(project_id)
+    if signal_type: query += " AND signal_type=?";   params.append(signal_type)
+    if drug:        query += " AND drugs LIKE ?";     params.append(f"%{drug}%")
+    if symptom:     query += " AND symptoms LIKE ?";  params.append(f"%{symptom}%")
+    if source_type: query += " AND source_type=?";   params.append(source_type)
     query += " ORDER BY created_at DESC LIMIT ? OFFSET ?"
     params += [limit, offset]
     with get_conn() as conn:
-        return [dict(r) for r in conn.execute(query, params).fetchall()]
+        rows = conn.execute(query, params).fetchall()
+        return [_parse(dict(r)) for r in rows]
 
 
 @router.get("/{genome_id}")
 def get_signal(genome_id: str):
+    """Single genome by ID — used by genome detail panel."""
     with get_conn() as conn:
         row = conn.execute(
-            "SELECT * FROM genomes WHERE genome_id=?", (genome_id,)).fetchone()
-        return dict(row) if row else {}
+            "SELECT * FROM genomes WHERE genome_id=?", (genome_id,)
+        ).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Genome not found")
+        return _parse(dict(row))

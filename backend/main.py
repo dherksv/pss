@@ -1,25 +1,52 @@
 """
-main.py — FastAPI application entry point
-OWNER: Engineer C
-
-This is the API layer. Add routes by importing routers from routes/.
-WebSocket endpoint for live genome streaming is here.
+main.py - FastAPI application entry point | OWNER: Engineer C
+WebSocket manager for live genome streaming lives here.
 """
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
-import os
+import os, json
 
 from routes import projects, signals, analysis, sources, alerts
 from storage.sqlite_store import init_db
 
-# ── Startup / Shutdown ──────────────────────────────────────────────────────
+
+# ── WebSocket connection manager ──────────────────────────────────────────────
+class ConnectionManager:
+    def __init__(self):
+        self.active: list[WebSocket] = []
+
+    async def connect(self, ws: WebSocket):
+        await ws.accept()
+        self.active.append(ws)
+
+    def disconnect(self, ws: WebSocket):
+        if ws in self.active:
+            self.active.remove(ws)
+
+    async def broadcast(self, data: dict):
+        dead = []
+        for ws in self.active:
+            try:
+                await ws.send_json(data)
+            except Exception:
+                dead.append(ws)
+        for ws in dead:
+            self.disconnect(ws)
+
+
+manager = ConnectionManager()
+
+
+# ── Startup / Shutdown ────────────────────────────────────────────────────────
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    init_db()          # initialise SQLite tables
+    init_db()
+    print("Database initialised.")
     yield
-    # cleanup on shutdown if needed
 
+
+# ── App ───────────────────────────────────────────────────────────────────────
 app = FastAPI(
     title="Patient Safety Sentinel API",
     description="Real-time social listening for patient safety signals",
@@ -35,44 +62,42 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ── Routers ──────────────────────────────────────────────────────────────────
-app.include_router(projects.router,  prefix="/api/projects",  tags=["projects"])
-app.include_router(signals.router,   prefix="/api/signals",   tags=["signals"])
-app.include_router(analysis.router,  prefix="/api/analysis",  tags=["analysis"])
-app.include_router(sources.router,   prefix="/api/sources",   tags=["sources"])
-app.include_router(alerts.router,    prefix="/api/alerts",    tags=["alerts"])
 
-# ── WebSocket — live genome feed ─────────────────────────────────────────────
-class ConnectionManager:
-    def __init__(self):
-        self.active: list[WebSocket] = []
+# ── Routers ───────────────────────────────────────────────────────────────────
+app.include_router(projects.router, prefix="/api/projects", tags=["projects"])
+app.include_router(signals.router,  prefix="/api/signals",  tags=["signals"])
+app.include_router(analysis.router, prefix="/api/analysis", tags=["analysis"])
+app.include_router(sources.router,  prefix="/api/sources",  tags=["sources"])
+app.include_router(alerts.router,   prefix="/api/alerts",   tags=["alerts"])
 
-    async def connect(self, ws: WebSocket):
-        await ws.accept()
-        self.active.append(ws)
 
-    def disconnect(self, ws: WebSocket):
-        self.active.remove(ws)
-
-    async def broadcast(self, data: dict):
-        for ws in self.active:
-            try:
-                await ws.send_json(data)
-            except Exception:
-                pass
-
-manager = ConnectionManager()
-
+# ── WebSocket — live genome feed ──────────────────────────────────────────────
 @app.websocket("/ws/feed")
 async def websocket_feed(websocket: WebSocket):
-    """Live genome stream — frontend connects here for real-time updates."""
+    """
+    Frontend connects here to receive live genome stream.
+    Every processed genome is pushed here by the worker via /internal/broadcast.
+    """
     await manager.connect(websocket)
     try:
         while True:
-            await websocket.receive_text()   # keep alive
+            await websocket.receive_text()  # keep-alive ping
     except WebSocketDisconnect:
         manager.disconnect(websocket)
 
+
+# ── Internal broadcast endpoint (called by worker.py) ────────────────────────
+@app.post("/internal/broadcast")
+async def internal_broadcast(genome: dict):
+    """
+    Worker calls this after processing each genome.
+    We push it to all connected dashboard WebSocket clients.
+    """
+    await manager.broadcast(genome)
+    return {"pushed_to": len(manager.active)}
+
+
+# ── Health check ──────────────────────────────────────────────────────────────
 @app.get("/health")
 async def health():
-    return {"status": "ok"}
+    return {"status": "ok", "connected_clients": len(manager.active)}
