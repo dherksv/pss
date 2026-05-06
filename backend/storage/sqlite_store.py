@@ -113,7 +113,13 @@ def get_active_projects() -> list:
     with get_conn() as conn:
         rows = conn.execute(
             "SELECT * FROM projects WHERE is_active=1").fetchall()
-        return [dict(r) for r in rows]
+        result = []
+        for r in rows:
+            d = dict(r)
+            d["keywords"] = json.loads(d.get("keywords") or "[]")
+            d["sources"]  = json.loads(d.get("sources")  or "[]")
+            result.append(d)
+        return result
 
 
 def get_recent_genomes(drug=None, symptom=None, since=None) -> list:

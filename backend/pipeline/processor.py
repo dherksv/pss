@@ -223,3 +223,13 @@ class PipelineProcessor:
             f"{novelty_explain}"
             f"{pii_note}"
         )
+
+
+# Standalone function for worker import
+def process_post(raw_post: dict) -> Optional[dict]:
+    """
+    Process a single raw post through the pipeline.
+    Returns SignalGenome dict or None if filtered.
+    """
+    processor = PipelineProcessor()
+    return processor.process(raw_post)

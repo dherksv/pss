@@ -2,14 +2,17 @@ FROM node:20-alpine
 
 WORKDIR /app
 
+# Copy package files
 COPY package*.json ./
-RUN npm install
 
-# Ensure vite binary is executable
-RUN chmod +x node_modules/.bin/vite
+# Install dependencies including optional ones (needed for rollup native binaries)
+RUN npm ci && \
+    npm cache clean --force
 
+# Copy application files
 COPY . .
 
 EXPOSE 3000
 
-CMD ["npx", "vite", "--host", "0.0.0.0", "--port", "3000"]
+# Use npm exec to run vite
+CMD ["npm", "exec", "--", "vite", "--host", "0.0.0.0", "--port", "3000"]
