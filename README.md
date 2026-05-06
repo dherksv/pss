@@ -275,8 +275,8 @@ patient-safety-sentinel/
 ### Step 1 — Clone the repository
 
 ```bash
-git clone https://github.com/dherksv/patient-safety-sentinel.git
-cd patient-safety-sentinel
+git clone https://github.com/dherksv/pss.git
+cd pss
 ```
 
 ### Step 2 — Set up environment variables
