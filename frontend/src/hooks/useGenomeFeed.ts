@@ -1,37 +1,40 @@
-/**
- * useGenomeFeed.ts - WebSocket hook for live genome stream
- * OWNER: Engineer C
- * Connects to ws://localhost:8000/ws/feed
- * Returns latest genomes array, updated in real time
- */
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useRef } from 'react';
 
-const WS_URL = process.env.NEXT_PUBLIC_WS_URL || "ws://localhost:8000/ws/feed";
-const MAX_GENOMES = 100;
+function getWsUrl() {
+  const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  return `${proto}//${window.location.host}/ws/feed`;
+}
 
 export function useGenomeFeed() {
-  const [genomes, setGenomes]       = useState<any[]>([]);
-  const [connected, setConnected]   = useState(false);
-  const [lastGenome, setLastGenome] = useState<any>(null);
+  const [genomes, setGenomes]     = useState<any[]>([]);
+  const [connected, setConnected] = useState(false);
+  const [last, setLast]           = useState<any>(null);
+  const wsRef = useRef<WebSocket | null>(null);
 
   useEffect(() => {
-    const ws = new WebSocket(WS_URL);
+    let alive = true;
 
-    ws.onopen  = () => setConnected(true);
-    ws.onclose = () => setConnected(false);
-
-    ws.onmessage = (event) => {
+    function connect() {
       try {
-        const genome = JSON.parse(event.data);
-        setLastGenome(genome);
-        setGenomes(prev => [genome, ...prev].slice(0, MAX_GENOMES));
-      } catch (e) {
-        console.error("WebSocket parse error", e);
-      }
-    };
+        const ws = new WebSocket(getWsUrl());
+        wsRef.current = ws;
 
-    return () => ws.close();
+        ws.onopen    = () => { if (alive) setConnected(true); };
+        ws.onclose   = () => { if (!alive) return; setConnected(false); setTimeout(connect, 3000); };
+        ws.onerror   = () => ws.close();
+        ws.onmessage = (e) => {
+          try {
+            const g = JSON.parse(e.data);
+            setLast(g);
+            setGenomes(prev => [g, ...prev].slice(0, 150));
+          } catch {}
+        };
+      } catch { setTimeout(connect, 5000); }
+    }
+
+    connect();
+    return () => { alive = false; wsRef.current?.close(); };
   }, []);
 
-  return { genomes, connected, lastGenome };
+  return { genomes, connected, last };
 }

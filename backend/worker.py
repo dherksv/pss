@@ -30,6 +30,7 @@ import sys
 import threading
 import time
 from datetime import datetime, timezone
+import httpx
 
 import requests
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -257,46 +258,47 @@ def _register_job(
 def pipeline_worker(store) -> None:
     """
     Long-running thread. Reads RawPost dicts from POST_QUEUE one at a time,
-    calls Engineer B's process_post(), saves the resulting genome, and pushes
-    it to Engineer C's WebSocket endpoint.
+    processes them into genomes, stores them (SQLite + ChromaDB),
+    and pushes them to the API.
 
     Runs until SHUTDOWN is set, draining the queue before exiting.
     """
     logger.info("Pipeline worker thread started.")
 
-    # Lazy-load Engineer B's processor — models initialize on first call
-    process_post = None
+    process_post = None  # lazy load
 
     while not SHUTDOWN.is_set():
         try:
-            # Block for up to 1s so the loop checks SHUTDOWN regularly
             raw_post = POST_QUEUE.get(timeout=1.0)
         except queue.Empty:
             continue
 
         try:
             source = raw_post.get("source", "unknown")
-            logger.info("Processing post from %s (queue depth: %d).",
-                        source, POST_QUEUE.qsize())
+            logger.info(
+                "Processing post from %s (queue depth: %d)",
+                source, POST_QUEUE.qsize()
+            )
 
-            # Lazy-load pipeline on first real post
+            # Lazy-load pipeline
             if process_post is None:
                 logger.info("Loading Engineer B's pipeline (first post)...")
                 process_post = _get_pipeline()
                 logger.info("Pipeline loaded.")
 
-            # --- Engineer B's processing ---
+            # --- Engineer B processing ---
             genome = process_post(raw_post)
 
             if genome is None:
-                # process_post returns None when post has no health signal
-                logger.debug("No signal detected in post from %s — skipping.", source)
-                POST_QUEUE.task_done()
+                logger.debug(
+                    "No signal detected in post from %s — skipping.", source
+                )
                 continue
 
-            # --- Persist to SQLite (Engineer A's store) ---
+            # --- Persist to SQLite ---
             project_id = genome.get("project_id") or _infer_project_id(raw_post)
             saved = save_genome(genome, project_id)
+
             if saved:
                 logger.info(
                     "Genome saved: %s | signal=%s | drug=%s | severity=%s",
@@ -306,20 +308,39 @@ def pipeline_worker(store) -> None:
                     genome.get("severity", "?"),
                 )
 
-            # --- Push to Engineer C's FastAPI WebSocket endpoint ---
-            _push_genome_to_api(genome)
+                # --- NEW: Store in ChromaDB ---
+                try:
+                    from storage.chroma_store import store_genome_vector
+                    store_genome_vector(genome)
+                except Exception as e:
+                    logger.warning("ChromaDB store failed: %s", e)
+
+            # --- Push to API (broadcast endpoint) ---
+            try:
+                import httpx
+                httpx.post(
+                    "http://localhost:8000/internal/broadcast",
+                    json=genome if isinstance(genome, dict) else genome.to_dict(),
+                    timeout=2.0
+                )
+            except Exception as e:
+                logger.warning("Broadcast failed: %s", e)
 
         except Exception as exc:
             logger.error(
                 "Pipeline error on post %s: %s",
-                raw_post.get("post_id", "?"), exc, exc_info=True,
+                raw_post.get("post_id", "?"),
+                exc,
+                exc_info=True,
             )
         finally:
             POST_QUEUE.task_done()
 
-    # SHUTDOWN set — drain remaining items before exiting
-    logger.info("Shutdown signal received — draining queue (%d items)...",
-                POST_QUEUE.qsize())
+    # --- Shutdown handling ---
+    logger.info(
+        "Shutdown signal received — draining queue (%d items)...",
+        POST_QUEUE.qsize()
+    )
     _drain_queue(process_post, store)
     logger.info("Pipeline worker thread exited.")
 
