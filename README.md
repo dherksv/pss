@@ -1,4 +1,4 @@
-# Patient Safety Sentinel 
+# Patient Safety Sentinel 🏥
 
 > **Real-Time Social Listening for Patient Experience & Safety Signals**
 >
@@ -6,7 +6,7 @@
 
 ---
 
-![Dashboard Overview](https://raw.githubusercontent.com/YOUR_USERNAME/patient-safety-sentinel/main/docs/screenshots/dashboard-overview.png)
+![Dashboard Overview](https://raw.githubusercontent.com/dherksv/pss/screenshot/overview.png)
 
 ---
 
@@ -103,27 +103,27 @@ It continuously ingests social media posts, runs them through a multi-stage NLP 
 ## Screenshots
 
 ### Live Signal Feed
-![Live Feed](https://raw.githubusercontent.com/YOUR_USERNAME/patient-safety-sentinel/main/docs/screenshots/live-feed.png)
+![Live Feed](https://raw.githubusercontent.com/dherksv/pss/screenshot/live.png)
 
 *Real-time genome cards streaming in as posts are processed. Each card shows source, signal type, detected entities, novelty score, and confidence.*
 
 ### Outbreak Monitor
-![Outbreak Monitor](https://raw.githubusercontent.com/YOUR_USERNAME/patient-safety-sentinel/main/docs/screenshots/outbreak-monitor.png)
+![Outbreak Monitor](https://raw.githubusercontent.com/dherksv/pss/screenshot/outbreaks.png)
 
 *Active outbreak clusters with severity badges (WATCH / WARNING / ALERT / CRITICAL), affected regions, and propagation graph.*
 
 ### Signal Genome Detail
-![Genome Detail](https://raw.githubusercontent.com/YOUR_USERNAME/patient-safety-sentinel/main/docs/screenshots/genome-detail.png)
+![Genome Detail](https://raw.githubusercontent.com/dherksv/pss/screenshot/live.png)
 
 *Full genome inspection: entities extracted, FDA label cross-reference, novelty score, PII detection status, and XAI explanation.*
 
 ### Trend Analysis
-![Trends](https://raw.githubusercontent.com/YOUR_USERNAME/patient-safety-sentinel/main/docs/screenshots/trends.png)
+![Trends](https://raw.githubusercontent.com/dherksv/pss/screenshot/trends.png)
 
 *30-day signal volume chart for a drug, top entities, and signal type breakdown.*
 
 ### Source Discovery Agent
-![Source Discovery](https://raw.githubusercontent.com/YOUR_USERNAME/patient-safety-sentinel/main/docs/screenshots/source-discovery.png)
+![Source Discovery](https://raw.githubusercontent.com/dherksv/pss/screenshot/config.png)
 
 *Agentic source discovery — type a topic, the agent finds and scores relevant communities automatically.*
 
@@ -275,7 +275,7 @@ patient-safety-sentinel/
 ### Step 1 — Clone the repository
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/patient-safety-sentinel.git
+git clone https://github.com/dherksv/patient-safety-sentinel.git
 cd patient-safety-sentinel
 ```
 
