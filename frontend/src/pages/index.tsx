@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useGenomeFeed } from '../hooks/useGenomeFeed';
 import { api } from '../lib/api';
 import LiveFeed      from '../components/LiveFeed';
@@ -20,12 +20,31 @@ const RAIL: { key: View; icon: string; tip: string }[] = [
 export default function Dashboard() {
   const [view, setView]         = useState<View>('live');
   const [projects, setProjects] = useState<any[]>([]);
+  const [historical, setHistorical] = useState<any[]>([]);
+  const [loadingSignals, setLoadingSignals] = useState(true);
   const [theme, setTheme]       = useState<'dark'|'light'>('dark');
 
-  const { genomes, connected } = useGenomeFeed();
+  const { genomes: liveGenomes, connected } = useGenomeFeed();
+  
+  // Deduplicate genomes by ID to prevent React key conflicts
+  const genomes = useMemo(() => {
+    const allGenomes = [...historical, ...liveGenomes];
+    const seen = new Set();
+    return allGenomes
+      .filter(g => {
+        if (seen.has(g.genome_id)) return false;
+        seen.add(g.genome_id);
+        return true;
+      })
+      .slice(0, 150);
+  }, [historical, liveGenomes]);
 
   useEffect(() => {
     api.getProjects().then(setProjects).catch(() => {});
+    api.getSignals({ limit: '50' })
+      .then(data => setHistorical(data || []))
+      .catch(() => setHistorical([]))
+      .finally(() => setLoadingSignals(false));
   }, []);
 
   const titles: Record<View, string> = {
@@ -83,7 +102,7 @@ export default function Dashboard() {
 
         {/* Panels */}
         <div className="content">
-          {view === 'live'      && <LiveFeed genomes={genomes} connected={connected}/>}
+          {view === 'live'      && <LiveFeed genomes={genomes} connected={connected} loading={loadingSignals}/>}
           {view === 'outbreaks' && <OutbreakPanel/>}
           {view === 'trends'    && <TrendPanel genomes={genomes}/>}
           {view === 'config'    && <ConfigPanel projects={projects} setProjects={setProjects}/>}

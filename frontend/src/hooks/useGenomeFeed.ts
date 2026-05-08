@@ -2,8 +2,14 @@ import { useState, useEffect, useRef } from 'react';
 import { api } from '../lib/api';
 
 function getWsUrl() {
-  // Use relative path so Vite proxy can handle it
-  return '/ws/feed';
+  const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const host = window.location.hostname;
+
+  if (host === 'localhost' || host === '127.0.0.1') {
+    return `${proto}//${host}:8000/ws/feed`;
+  }
+
+  return `${proto}//${window.location.host}/ws/feed`;
 }
 
 export function useGenomeFeed() {

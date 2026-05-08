@@ -25,6 +25,9 @@ export default function LiveFeed({ genomes, connected, loading = false }: Props)
               {connected ? '🟢 Real-time' : '🔴 Demo mode'}
             </div>
             <div className="panel-title">Signal Genome Feed</div>
+            <div className="panel-subtitle" style={{ marginTop:4, fontSize:12, color:'var(--muted)' }}>
+              Live and historical genome signals from the worker pipeline.
+            </div>
           </div>
           <div className="panel-actions">
             <select className="p-btn" value={filter}

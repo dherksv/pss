@@ -24,7 +24,7 @@ report:  return DiscoveredSource list to Engineer A's source registry
 import re
 import logging
 import requests
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -147,6 +147,28 @@ class SourceDiscoveryAgent:
     def discover_for_drug(self, drug: str) -> list[DiscoveredSource]:
         """Targeted discovery for a single drug. Used when outbreak fires."""
         return self._act_discover(drug, existing_sources=set())
+
+    def discover(self, topic: str, keywords: list[str]) -> list[dict]:
+        """Discover candidate sources from a topic and optional keyword list."""
+        search_terms = [topic.strip()] + [kw.strip() for kw in keywords if kw.strip()]
+        seen_ids = set()
+        discovered = []
+
+        for term in search_terms[:4]:
+            if not term:
+                continue
+            discovered.extend(self._discover_reddit_subs(term))
+            discovered.extend(self._discover_forums(term))
+            discovered.extend(self._discover_fda_feeds(term))
+
+        unique = []
+        for src in discovered:
+            if src.source_id in seen_ids:
+                continue
+            seen_ids.add(src.source_id)
+            unique.append(asdict(src))
+
+        return unique
 
     # ------------------------------------------------------------------
     # OBSERVE — pull high-novelty genomes

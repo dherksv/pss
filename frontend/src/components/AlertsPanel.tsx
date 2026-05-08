@@ -21,8 +21,8 @@ export default function AlertsPanel() {
 
   useEffect(() => {
     api.getAlerts(false)
-      .then(setAlerts)
-      .catch(() => {});
+      .then(data => setAlerts(data.length ? data : DEMO_ALERTS))
+      .catch(() => setAlerts(DEMO_ALERTS));
   }, []);
 
   async function resolve(id: number) {
