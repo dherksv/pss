@@ -17,7 +17,7 @@ COPY download_models.py /app/
 
 # Pre-cache required models before enabling offline mode
 # Models can be downloaded here; worker will run in offline mode
-#RUN python /app/download_models.py || true
+RUN python /app/download_models.py || true
 
 COPY . .
 
