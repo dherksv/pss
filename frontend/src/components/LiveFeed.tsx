@@ -4,9 +4,10 @@ import { GenomeCard, GenomeDetail } from './GenomeCard';
 interface Props {
   genomes: any[];
   connected: boolean;
+  loading?: boolean;
 }
 
-export default function LiveFeed({ genomes, connected }: Props) {
+export default function LiveFeed({ genomes, connected, loading = false }: Props) {
   const [selected, setSelected] = useState<any>(null);
   const [filter, setFilter]     = useState('all');
 
@@ -42,8 +43,10 @@ export default function LiveFeed({ genomes, connected }: Props) {
         <div className="genome-feed">
           {filtered.length === 0 && (
             <div className="empty-state">
-              Waiting for signals…<br/>
-              <span style={{ fontSize:10 }}>Make sure worker is running</span>
+              {loading ? 'Loading signals...' : 'Waiting for signals…'}<br/>
+              <span style={{ fontSize:10 }}>
+                {loading ? 'Fetching historical data' : 'Make sure worker is running'}
+              </span>
             </div>
           )}
           {filtered.map(g => (

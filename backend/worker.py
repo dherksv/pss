@@ -63,7 +63,7 @@ SHUTDOWN = threading.Event()
 # FastAPI WebSocket push endpoint (Engineer C)
 # Internal Docker network URL — worker → api service
 # ---------------------------------------------------------------------------
-WS_PUSH_URL = os.getenv("WS_PUSH_URL", "http://api:8000/internal/genome")
+WS_PUSH_URL = os.getenv("WS_PUSH_URL", "http://api:8000/internal/broadcast")
 
 # ---------------------------------------------------------------------------
 # Crawler registry — source_type → class
@@ -134,7 +134,7 @@ def setup_scheduler(store) -> BackgroundScheduler:
     if not projects:
         logger.warning(
             "No active projects found in SQLite. "
-            "Run scripts/seed_data.py to create demo projects."
+            "Run docker compose exec api python /app/scripts/seed_data.py to create demo projects."
         )
 
     registered = 0
@@ -145,7 +145,7 @@ def setup_scheduler(store) -> BackgroundScheduler:
         sources    = project["sources"]
 
         logger.info(
-            "Registering jobs for project %d (%s) — %d source(s).",
+            "Registering jobs for project %s (%s) — %d source(s).",
             project_id, project.get("name", "unnamed"), len(sources),
         )
 
@@ -319,7 +319,7 @@ def pipeline_worker(store) -> None:
             try:
                 import httpx
                 httpx.post(
-                    "http://localhost:8000/internal/broadcast",
+                    WS_PUSH_URL,
                     json=genome if isinstance(genome, dict) else genome.to_dict(),
                     timeout=2.0
                 )

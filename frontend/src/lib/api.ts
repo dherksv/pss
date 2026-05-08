@@ -1,4 +1,7 @@
-const BASE = '';  // Vite proxy handles routing to http://api:8000
+const host = window.location.hostname;
+const BASE = (host === 'localhost' || host === '127.0.0.1')
+  ? `${window.location.protocol}//${host}:8000`
+  : '';
 
 async function get(path: string) {
   const res = await fetch(BASE + path);

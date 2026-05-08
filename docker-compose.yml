@@ -7,6 +7,7 @@ services:
       - "8000:8000"
     volumes:
       - ./backend:/app
+      - ./scripts:/app/scripts
       - chroma_data:/app/chroma_data
       - sqlite_data:/app/db
     env_file: .env
@@ -18,12 +19,18 @@ services:
     build: ./backend
     volumes:
       - ./backend:/app
+      - ./scripts:/app/scripts
       - chroma_data:/app/chroma_data
       - sqlite_data:/app/db
-    env_file: .env
+      - ./backend/models_cache/:/app/models_cache
+    env_file: .env 
     depends_on:
       - redis
     command: python worker.py
+    environment:
+      - TRANSFORMERS_OFFLINE=1
+      - TRANSFORMERS_CACHE=/app/models_cache/hub
+      - HF_HOME=/app/models_cache/hub
 
   redis:
     image: redis:7-alpine

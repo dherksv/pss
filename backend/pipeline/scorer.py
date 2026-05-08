@@ -15,6 +15,7 @@ High novelty (>0.7) = potentially undocumented adverse signal.
 """
 
 import logging
+import os
 import requests
 from typing import Optional
 from dataclasses import dataclass
@@ -29,14 +30,22 @@ _sentiment_model = None
 _distress_model  = None
 
 
+def _get_transformers_cache_dir() -> str:
+    return os.getenv("TRANSFORMERS_CACHE", os.getenv("HF_HOME", "./models_cache/hub"))
+
+
 def _get_sentiment():
     global _sentiment_model
     if _sentiment_model is None:
         from transformers import pipeline
+        cache_dir = _get_transformers_cache_dir()
+        os.makedirs(cache_dir, exist_ok=True)
         logger.info("Loading sentiment model (first call)...")
         _sentiment_model = pipeline(
             "sentiment-analysis",
             model="cardiffnlp/twitter-roberta-base-sentiment-latest",
+            cache_dir=cache_dir,
+            local_files_only=True,
         )
         logger.info("Sentiment model loaded.")
     return _sentiment_model
@@ -46,10 +55,14 @@ def _get_distress():
     global _distress_model
     if _distress_model is None:
         from transformers import pipeline
+        cache_dir = _get_transformers_cache_dir()
+        os.makedirs(cache_dir, exist_ok=True)
         logger.info("Loading distress model (first call)...")
         _distress_model = pipeline(
             "text-classification",
-            model="mental/mental-roberta-base",
+            model="j-hartmann/emotion-english-distilroberta-base",
+            cache_dir=cache_dir,
+            local_files_only=True,
         )
         logger.info("Distress model loaded.")
     return _distress_model

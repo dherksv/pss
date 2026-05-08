@@ -219,6 +219,45 @@ class TrendAnalyzer:
             logger.debug(f"Trend geo enrichment failed (non-fatal): {e}")
         return genome
 
+    def signal_trend(self, drug: str, days: int = 30) -> dict:
+        """
+        Get signal count timeline for a drug over the last N days.
+        Returns {"timeline": {"2024-01-01": 5, "2024-01-02": 3, ...}}
+        Used by the frontend trends panel.
+        """
+        from storage.sqlite_store import get_conn
+        from datetime import datetime, timedelta
+
+        timeline = {}
+        now = datetime.now()
+
+        # Generate timeline for last N days
+        for i in range(days):
+            date = (now - timedelta(days=i)).strftime('%Y-%m-%d')
+            timeline[date] = 0
+
+        try:
+            with get_conn() as conn:
+                # Query genomes table for signals containing this drug in the drugs column
+                rows = conn.execute("""
+                    SELECT DATE(created_at) as date, COUNT(*) as count
+                    FROM genomes
+                    WHERE drugs LIKE ?
+                    AND created_at >= ?
+                    GROUP BY DATE(created_at)
+                """, (f'%{drug}%', (now - timedelta(days=days)).isoformat()))
+
+                # Update timeline with actual counts
+                for row in rows:
+                    date_str = row['date']
+                    if date_str in timeline:
+                        timeline[date_str] = row['count']
+
+        except Exception as e:
+            logger.warning(f"Failed to get signal trend for {drug}: {e}")
+
+        return {"timeline": timeline}
+
     @staticmethod
     def _unavailable_result() -> dict:
         return {

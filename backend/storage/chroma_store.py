@@ -11,6 +11,7 @@ Collection schema stored in metadata:
 """
 
 import logging
+import os
 import uuid
 from typing import Optional
 from datetime import datetime, timedelta, timezone
@@ -58,8 +59,14 @@ def _get_embedder():
     global _embedder
     if _embedder is None:
         from sentence_transformers import SentenceTransformer
-        logger.info("Loading sentence-transformers model...")
-        _embedder = SentenceTransformer("all-MiniLM-L6-v2")
+        cache_folder = os.getenv("TRANSFORMERS_CACHE", os.getenv("HF_HOME", "./models_cache/hub"))
+        os.makedirs(cache_folder, exist_ok=True)
+        logger.info("Loading sentence-transformers model from local cache...")
+        _embedder = SentenceTransformer(
+            "all-MiniLM-L6-v2",
+            cache_folder=cache_folder,
+            local_files_only=True,
+        )
         logger.info("Sentence transformer loaded.")
     return _embedder
 
@@ -206,3 +213,9 @@ def get_chroma_store() -> ChromaStore:
     if _store_instance is None:
         _store_instance = ChromaStore()
     return _store_instance
+
+
+def store_genome_vector(genome) -> None:
+    """Store a genome in ChromaDB vector store. Wrapper for worker.py."""
+    store = get_chroma_store()
+    return store.store_genome(genome)

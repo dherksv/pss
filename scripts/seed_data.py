@@ -3,8 +3,17 @@ scripts/seed_data.py - Pre-seed demo data
 Run before demo to populate ChromaDB + SQLite with realistic signal data.
 Usage: python scripts/seed_data.py
 """
-import sys, json, uuid
-sys.path.append("./backend")
+import sys, json, uuid, os
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+BACKEND_PATHS = [
+    os.path.normpath(os.path.join(HERE, '..', 'backend')),
+    os.path.normpath(os.path.join(HERE, '..')),
+]
+for path in BACKEND_PATHS:
+    if os.path.isdir(path):
+        sys.path.insert(0, path)
+        break
 
 from storage.sqlite_store import init_db, save_genome
 from models.genome import SignalGenome, Entities, NoveltyScore

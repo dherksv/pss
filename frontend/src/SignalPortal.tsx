@@ -123,7 +123,7 @@ export default function SignalPortal() {
   const [projects, setProjects] = useState<any[]>([]);
   const [theme, setTheme] = useState<'dark' | 'light'>('dark');
 
-  const { genomes: liveGenomes, connected } = useGenomeFeed();
+  const { genomes: liveGenomes, connected, loading } = useGenomeFeed();
   const genomes = liveGenomes.length > 0 ? liveGenomes : DEMO_GENOMES;
 
   useEffect(() => {
@@ -186,7 +186,7 @@ export default function SignalPortal() {
 
         <div className="content">
           {view === 'overview' && <OverviewPanel genomes={genomes} outbreaks={outbreaks} alerts={alerts} setView={setView} />}
-          {view === 'signals' && <SignalsPanel genomes={genomes} selected={selected} setSelected={setSelected} />}
+          {view === 'signals' && <SignalsPanel genomes={genomes} selected={selected} setSelected={setSelected} connected={connected} loading={loading} />}
           {view === 'outbreaks' && <OutbreaksPanel outbreaks={outbreaks} />}
           {view === 'trends' && <TrendsPanel genomes={genomes} />}
           {view === 'config' && <ConfigPanel projects={projects} setProjects={setProjects} />}
@@ -362,7 +362,7 @@ function OverviewPanel({ genomes, outbreaks, alerts, setView }: any) {
 // ─────────────────────────────────────────────────────────────────────────────
 // SIGNALS PANEL
 // ─────────────────────────────────────────────────────────────────────────────
-function SignalsPanel({ genomes, selected, setSelected }: any) {
+function SignalsPanel({ genomes, selected, setSelected, connected, loading }: any) {
   const [filter, setFilter] = useState('all');
 
   const filtered = filter === 'all'
@@ -374,7 +374,9 @@ function SignalsPanel({ genomes, selected, setSelected }: any) {
       <div className="panel">
         <div className="panel-hdr">
           <div>
-            <div className="panel-kicker">Real-time</div>
+            <div className="panel-kicker">
+              {connected ? '🟢 Real-time' : '🔴 Demo mode'}
+            </div>
             <div className="panel-title">Signal Genome Feed</div>
           </div>
           <div className="panel-actions">
@@ -391,7 +393,12 @@ function SignalsPanel({ genomes, selected, setSelected }: any) {
         </div>
         <div className="genome-feed">
           {filtered.length === 0 && (
-            <div className="empty-state">No signals yet — waiting for data...</div>
+            <div className="empty-state">
+              {loading ? 'Loading signals...' : 'Waiting for signals…'}<br/>
+              <span style={{ fontSize:10 }}>
+                {loading ? 'Fetching historical data' : 'Make sure worker is running'}
+              </span>
+            </div>
           )}
           {filtered.map((g: any) => (
             <GenomeCard

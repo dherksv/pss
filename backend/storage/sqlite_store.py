@@ -3,6 +3,7 @@ storage/sqlite_store.py - SQLite persistence layer | OWNER: Engineer A
 Stores genome metadata, projects, outbreaks, alerts.
 ChromaDB (vector store) is in chroma_store.py — Engineer B owns that.
 """
+import logging
 import sqlite3, json, os
 from datetime import datetime
 
@@ -14,6 +15,24 @@ def get_conn():
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     return conn
+
+
+def _resolve(obj, path, default=None):
+    """Resolve nested attributes or dict keys from a genome object."""
+    if obj is None:
+        return default
+    if hasattr(obj, path):
+        return getattr(obj, path)
+    if isinstance(obj, dict):
+        parts = path.split('.')
+        value = obj
+        for part in parts:
+            if isinstance(value, dict) and part in value:
+                value = value[part]
+            else:
+                return default
+        return value
+    return default
 
 
 def init_db():
@@ -62,37 +81,46 @@ def init_db():
             created_at TEXT,
             updated_at TEXT
         );
-        CREATE TABLE IF NOT EXISTS alerts (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            genome_id TEXT,
-            outbreak_id TEXT,
-            alert_type TEXT,
-            message TEXT,
-            resolved INTEGER DEFAULT 0,
-            created_at TEXT
+        CREATE TABLE IF NOT EXISTS seen_posts (
+            post_id TEXT PRIMARY KEY,
+            source TEXT NOT NULL,
+            seen_at TEXT
         );
         """)
     print("Database initialised.")
 
 
-def save_genome(genome, project_id: str = ""):
-    with get_conn() as conn:
-        conn.execute("""
-        INSERT OR REPLACE INTO genomes VALUES (
-            ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
-        )""", (
-            genome.genome_id, genome.post_id, project_id,
-            genome.source, genome.source_type, genome.source_url,
-            genome.signal_type, genome.sentiment_score,
-            genome.distress_level, genome.confidence_score,
-            genome.novelty.score, int(genome.pii_detected),
-            int(genome.phi_detected), genome.cluster_id,
-            json.dumps(genome.entities.drugs),
-            json.dumps(genome.entities.symptoms),
-            json.dumps(genome.entities.locations),
-            genome.explanation,
-            datetime.utcnow().isoformat(),
-        ))
+def save_genome(genome, project_id: str = "") -> bool:
+    try:
+        with get_conn() as conn:
+            conn.execute("""
+            INSERT OR REPLACE INTO genomes VALUES (
+                ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
+            )""", (
+                _resolve(genome, "genome_id"),
+                _resolve(genome, "post_id"),
+                project_id,
+                _resolve(genome, "source"),
+                _resolve(genome, "source_type"),
+                _resolve(genome, "source_url"),
+                _resolve(genome, "signal_type"),
+                _resolve(genome, "sentiment_score"),
+                _resolve(genome, "distress_level"),
+                _resolve(genome, "confidence_score"),
+                _resolve(genome, "novelty.score", 0.0),
+                int(bool(_resolve(genome, "pii_detected", False))),
+                int(bool(_resolve(genome, "phi_detected", False))),
+                _resolve(genome, "cluster_id"),
+                json.dumps(_resolve(genome, "entities.drugs", [])),
+                json.dumps(_resolve(genome, "entities.symptoms", [])),
+                json.dumps(_resolve(genome, "entities.locations", [])),
+                _resolve(genome, "explanation"),
+                datetime.utcnow().isoformat(),
+            ))
+        return True
+    except Exception as exc:
+        logging.error("Failed to save genome to SQLite: %s", exc, exc_info=True)
+        return False
 
 
 def save_outbreak(outbreak):
@@ -146,3 +174,20 @@ def get_genomes_by_period(project_id=None, drug=None, since=None) -> list:
         query += " AND created_at >= ?"; params.append(since.isoformat())
     with get_conn() as conn:
         return [dict(r) for r in conn.execute(query, params).fetchall()]
+
+
+def mark_post_seen(post_id: str, source: str) -> None:
+    """Mark a post as seen to avoid reprocessing."""
+    with get_conn() as conn:
+        conn.execute("""
+        INSERT OR REPLACE INTO seen_posts VALUES (?, ?, ?)
+        """, (post_id, source, datetime.utcnow().isoformat()))
+
+
+def is_post_seen(post_id: str, source: str) -> bool:
+    """Check if a post has been seen before."""
+    with get_conn() as conn:
+        row = conn.execute("""
+        SELECT 1 FROM seen_posts WHERE post_id=? AND source=?
+        """, (post_id, source)).fetchone()
+        return row is not None

@@ -39,7 +39,7 @@ def _get_distress_model():
         logger.info("Loading distress classifier model (first call)...")
         _distress_model = pipeline(
             "text-classification",
-            model="mental/mental-roberta-base",
+            model="j-hartmann/emotion-english-distilroberta-base",
         )
         logger.info("Distress classifier model loaded.")
     return _distress_model

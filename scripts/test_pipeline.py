@@ -3,8 +3,17 @@ scripts/test_pipeline.py - Smoke test for the full pipeline
 Run to verify the system works end to end before demo.
 Usage: python scripts/test_pipeline.py
 """
-import sys
-sys.path.append("./backend")
+import sys, os
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+BACKEND_PATHS = [
+    os.path.normpath(os.path.join(HERE, '..', 'backend')),
+    os.path.normpath(os.path.join(HERE, '..')),
+]
+for path in BACKEND_PATHS:
+    if os.path.isdir(path):
+        sys.path.insert(0, path)
+        break
 
 from pipeline.processor import PipelineProcessor
 

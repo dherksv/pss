@@ -21,13 +21,13 @@ docker compose up --build
 ## Seed Demo Data
 
 ```bash
-docker compose exec api python /app/../scripts/seed_data.py
+docker compose exec api python /app/scripts/seed_data.py
 ```
 
 ## Smoke Test
 
 ```bash
-docker compose exec api python /app/../scripts/test_pipeline.py
+docker compose exec api python /app/scripts/test_pipeline.py
 ```
 
 ## Team Ownership

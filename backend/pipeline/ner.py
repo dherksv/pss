@@ -36,11 +36,11 @@ def _get_bio_ner():
         logger.info("Loading SciBERT NER model (first call)...")
         _bio_ner = pipeline(
             "ner",
-            model="allenai/scibert_scivocab_uncased",
+            model="d4data/biomedical-ner-all",
             aggregation_strategy="simple",
             # Uses TRANSFORMERS_CACHE env var automatically
         )
-        logger.info("SciBERT NER loaded.")
+        logger.info("Biomedical NER loaded.")
     return _bio_ner
 
 
