@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { GenomeCard, GenomeDetail } from './GenomeCard';
+import LocationMap from './LocationMap';
 
 interface Props {
   genomes: any[];
@@ -58,6 +59,8 @@ export default function LiveFeed({ genomes, connected, loading = false }: Props)
               onClick={() => setSelected(g)} />
           ))}
         </div>
+
+        <LocationMap genomes={genomes} />
       </div>
 
       {/* Detail pane */}

@@ -58,6 +58,8 @@ def init_db():
             distress_level REAL,
             confidence_score REAL,
             novelty_score REAL,
+            novelty_in_fda_label INTEGER DEFAULT 0,
+            novelty_faers_count INTEGER DEFAULT 0,
             pii_detected INTEGER,
             phi_detected INTEGER,
             cluster_id TEXT,
@@ -87,6 +89,14 @@ def init_db():
             seen_at TEXT
         );
         """)
+
+        # Migrate old genomes table schemas to preserve full novelty metadata.
+        cols = [row[1] for row in conn.execute('PRAGMA table_info(genomes)').fetchall()]
+        if 'novelty_in_fda_label' not in cols:
+            conn.execute('ALTER TABLE genomes ADD COLUMN novelty_in_fda_label INTEGER DEFAULT 0')
+        if 'novelty_faers_count' not in cols:
+            conn.execute('ALTER TABLE genomes ADD COLUMN novelty_faers_count INTEGER DEFAULT 0')
+
     print("Database initialised.")
 
 
@@ -95,7 +105,7 @@ def save_genome(genome, project_id: str = "") -> bool:
         with get_conn() as conn:
             conn.execute("""
             INSERT OR REPLACE INTO genomes VALUES (
-                ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
+                ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
             )""", (
                 _resolve(genome, "genome_id"),
                 _resolve(genome, "post_id"),
@@ -108,6 +118,8 @@ def save_genome(genome, project_id: str = "") -> bool:
                 _resolve(genome, "distress_level"),
                 _resolve(genome, "confidence_score"),
                 _resolve(genome, "novelty.score", 0.0),
+                int(bool(_resolve(genome, "novelty.in_fda_label", False))),
+                int(_resolve(genome, "novelty.faers_count", 0)),
                 int(bool(_resolve(genome, "pii_detected", False))),
                 int(bool(_resolve(genome, "phi_detected", False))),
                 _resolve(genome, "cluster_id"),

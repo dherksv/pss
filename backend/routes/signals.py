@@ -13,6 +13,15 @@ def _parse(row: dict) -> dict:
         if isinstance(row.get(field), str):
             try: row[field] = json.loads(row[field])
             except: row[field] = []
+
+    # Reconstruct nested novelty metadata from normalized SQL columns.
+    if "novelty_score" in row or "novelty_in_fda_label" in row or "novelty_faers_count" in row:
+        row["novelty"] = {
+            "score":            row.pop("novelty_score", 0.0),
+            "in_fda_label":     bool(row.pop("novelty_in_fda_label", False)),
+            "faers_count":      int(row.pop("novelty_faers_count", 0)),
+            "internal_7d_count": 0,
+        }
     return row
 
 

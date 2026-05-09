@@ -19,8 +19,12 @@ async function post(path: string, body: any) {
   return res.json();
 }
 
-async function patch(path: string) {
-  const res = await fetch(BASE + path, { method: 'PATCH' });
+async function patch(path: string, body?: any) {
+  const res = await fetch(BASE + path, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: body !== undefined ? JSON.stringify(body) : undefined,
+  });
   if (!res.ok) throw new Error(`PATCH ${path} → ${res.status}`);
   return res.json();
 }
@@ -30,6 +34,7 @@ export const api = {
   getProjects:     ()                              => get('/api/projects/'),
   createProject:   (data: any)                     => post('/api/projects/', data),
   getProject:      (id: string)                    => get(`/api/projects/${id}`),
+  updateProject:   (id: string, data: any)        => patch(`/api/projects/${id}`, data),
 
   // Signals — routes/signals.py
   getSignals:      (params?: Record<string,string>) =>

@@ -49,12 +49,26 @@ export default function ConfigPanel({ projects, setProjects }: any) {
       });
       setMsg(`✓ Project created — ID: ${res.project_id}`);
       setMsgType('success');
-      setProjects((p: any[]) => [...p, { id: res.project_id, name }]);
+      setProjects((p: any[]) => [...p, { id: res.project_id, name, is_active: true }]);
       setName('');
     } catch {
       setMsg(`✓ Project "${name}" saved (demo mode)`);
       setMsgType('success');
     } finally { setCreating(false); }
+  }
+
+  async function toggleProjectActive(projectId: string, active: boolean) {
+    try {
+      await api.updateProject(projectId, { is_active: active });
+      setProjects((prev: any[]) => prev.map(p =>
+        p.id === projectId ? { ...p, is_active: active } : p
+      ));
+      setMsg(active ? '✓ Project reactivated.' : '✓ Project deactivated.');
+      setMsgType('success');
+    } catch {
+      setMsg('⚠ Unable to update project status.');
+      setMsgType('error');
+    }
   }
 
   return (
@@ -135,15 +149,25 @@ export default function ConfigPanel({ projects, setProjects }: any) {
         {/* Existing projects table */}
         {projects.length > 0 && (
           <div style={{ marginTop:18 }}>
-            <div className="panel-kicker" style={{ marginBottom:8 }}>Active Projects</div>
+            <div className="panel-kicker" style={{ marginBottom:8 }}>Projects</div>
             <div className="tbl-wrap">
               <table>
-                <thead><tr><th>Name</th><th>Status</th></tr></thead>
+                <thead><tr><th>Name</th><th>Status</th><th>Action</th></tr></thead>
                 <tbody>
                   {projects.map((p: any) => (
                     <tr key={p.id}>
                       <td>{p.name}</td>
-                      <td><span className="pill pill-active">Active</span></td>
+                      <td>
+                        {p.is_active === false
+                          ? <span className="pill">Inactive</span>
+                          : <span className="pill pill-active">Active</span>}
+                      </td>
+                      <td>
+                        <button className="p-btn" style={{ minWidth:96 }}
+                          onClick={() => toggleProjectActive(p.id, !p.is_active)}>
+                          {p.is_active === false ? 'Reactivate' : 'Deactivate'}
+                        </button>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
